@@ -97,7 +97,7 @@ public partial class ProjectionDaemon : IProjectionDaemon, IObserver<ShardState>
     private async Task rebuildAgent(ISubscriptionAgent agent, long highWaterMark, TimeSpan shardTimeout)
     {
         // Ensure that the agent is stopped if it is already running
-        await StopAsync(agent.Name.Identity).ConfigureAwait(false);
+        await StopAgentAsync(agent.Name.Identity).ConfigureAwait(false);
 
         var errorOptions = _store.Options.Projections.Errors;
 
@@ -109,7 +109,7 @@ public partial class ProjectionDaemon : IProjectionDaemon, IObserver<ShardState>
         _active.Add(agent);
     }
 
-    public async Task StartShard(string shardName, CancellationToken token)
+    public async Task StartAgentAsync(string shardName, CancellationToken token)
     {
         if (!_highWater.IsRunning)
         {
@@ -123,7 +123,7 @@ public partial class ProjectionDaemon : IProjectionDaemon, IObserver<ShardState>
         await startAgent(agent, ShardExecutionMode.Continuous).ConfigureAwait(false);
     }
 
-    public async Task StopAsync(string shardName, Exception ex = null)
+    public async Task StopAgentAsync(string shardName, Exception ex = null)
     {
         var agent = _active.FirstOrDefault(x => x.Name.Identity == shardName);
         if (agent != null)
@@ -288,4 +288,7 @@ public partial class ProjectionDaemon : IProjectionDaemon, IObserver<ShardState>
     {
         return _deadLetterBlock.PostAsync(@event);
     }
+
+
+
 }
