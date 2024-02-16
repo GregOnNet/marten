@@ -8,6 +8,7 @@ using Marten.Internal.Sessions;
 using Marten.Internal.Storage;
 using Marten.Linq.QueryHandlers;
 using Weasel.Postgresql;
+using Weasel.Postgresql.SqlGeneration;
 
 namespace Marten.Events;
 
@@ -43,9 +44,13 @@ internal partial class EventStore: IEventIdentityStrategy<Guid>, IEventIdentityS
     }
 
     IQueryHandler<IReadOnlyList<IEvent>> IEventIdentityStrategy<Guid>.BuildEventQueryHandler(Guid id,
-        IEventStorage selector)
+        IEventStorage selector, ISqlFragment? filter = null)
     {
         var statement = new EventStatement(selector) { StreamId = id, TenantId = _tenant.TenantId };
+        if (filter != null)
+        {
+            statement.Filters = [filter];
+        }
 
         return new ListQueryHandler<IEvent>(statement, selector);
     }
@@ -78,9 +83,13 @@ internal partial class EventStore: IEventIdentityStrategy<Guid>, IEventIdentityS
     }
 
     IQueryHandler<IReadOnlyList<IEvent>> IEventIdentityStrategy<string>.BuildEventQueryHandler(string id,
-        IEventStorage selector)
+        IEventStorage selector, ISqlFragment? filter = null)
     {
         var statement = new EventStatement(selector) { StreamKey = id, TenantId = _tenant.TenantId };
+        if (filter != null)
+        {
+            statement.Filters = [filter];
+        }
 
         return new ListQueryHandler<IEvent>(statement, selector);
     }
@@ -187,5 +196,6 @@ public interface IEventIdentityStrategy<TId>
     IEventStream<TDoc> AppendToStream<TDoc>(TDoc document, DocumentSessionBase session, TId id, long version,
         CancellationToken cancellation);
 
-    IQueryHandler<IReadOnlyList<IEvent>> BuildEventQueryHandler(TId id, IEventStorage eventStorage);
+    IQueryHandler<IReadOnlyList<IEvent>> BuildEventQueryHandler(TId id, IEventStorage eventStorage,
+        ISqlFragment? filter = null);
 }

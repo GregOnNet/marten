@@ -15,6 +15,14 @@ internal class AsyncProjectionVersionPolicy : IDocumentPolicy
             {
                 mapping.Alias += "_" + projection.ProjectionVersion;
             }
+
+            if (projection.Lifecycle == ProjectionLifecycle.Async)
+            {
+                mapping.UseOptimisticConcurrency = false;
+                mapping.Metadata.Version.Enabled = false;
+                mapping.UseNumericRevisions = true;
+                mapping.Metadata.Revision.Enabled = true;
+            }
         }
     }
 }

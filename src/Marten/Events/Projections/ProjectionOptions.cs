@@ -46,7 +46,7 @@ public class ProjectionOptions: DaemonSettings
     private Lazy<Dictionary<string, AsyncProjectionShard>> _asyncShards;
     private ImHashMap<Type, object> _liveAggregators = ImHashMap<Type, object>.Empty;
 
-    internal readonly IFetchPlanner[] _builtInPlanners = [new InlineFetchPlanner(), new LiveFetchPlanner()];
+    internal readonly IFetchPlanner[] _builtInPlanners = [new InlineFetchPlanner(), new AsyncFetchPlanner(), new LiveFetchPlanner()];
 
     internal ProjectionOptions(StoreOptions options)
     {
