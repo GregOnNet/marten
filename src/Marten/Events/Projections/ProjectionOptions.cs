@@ -55,7 +55,7 @@ public class ProjectionOptions: DaemonSettings
     /// are to *not* skip any errors
     /// </summary>
     public ErrorHandlingOptions RebuildErrors { get; } = new();
-
+    
     /// <summary>
     /// Async daemon error handling polices while running continuously. The defaults
     /// are to skip serialization errors, unknown events, and apply errors
@@ -86,6 +86,12 @@ public class ProjectionOptions: DaemonSettings
         foreach (var kv in _liveAggregators.Enumerate()) yield return kv.Key;
 
         foreach (var projection in All.OfType<IAggregateProjection>()) yield return projection.AggregateType;
+    }
+
+    public bool TryFindAggregate(Type documentType, out IAggregateProjection projection)
+    {
+        projection = All.OfType<IAggregateProjection>().FirstOrDefault(x => x.AggregateType == documentType);
+        return projection != null;
     }
 
     internal IProjection[] BuildInlineProjections(DocumentStore store)
