@@ -45,6 +45,8 @@ public class ProjectionOptions: DaemonSettings
     private Lazy<Dictionary<string, AsyncProjectionShard>> _asyncShards;
     private ImHashMap<Type, object> _liveAggregators = ImHashMap<Type, object>.Empty;
 
+    internal readonly IFetchPlanner[] _builtInPlanners = [new InlineFetchPlanner(), new LiveFetchPlanner()];
+
     internal ProjectionOptions(StoreOptions options)
     {
         _options = options;
@@ -55,7 +57,7 @@ public class ProjectionOptions: DaemonSettings
     /// are to *not* skip any errors
     /// </summary>
     public ErrorHandlingOptions RebuildErrors { get; } = new();
-    
+
     /// <summary>
     /// Async daemon error handling polices while running continuously. The defaults
     /// are to skip serialization errors, unknown events, and apply errors
@@ -67,6 +69,23 @@ public class ProjectionOptions: DaemonSettings
         SkipUnknownEvents = true
     };
 
+    internal IEnumerable<IFetchPlanner> allPlanners()
+    {
+        foreach (var planner in FetchPlanners)
+        {
+            yield return planner;
+        }
+
+        foreach (var planner in _builtInPlanners)
+        {
+            yield return planner;
+        }
+    }
+
+    /// <summary>
+    /// Any custom or extended IFetchPlanner strategies for customizing FetchForWriting() behavior
+    /// </summary>
+    public List<IFetchPlanner> FetchPlanners { get; } = new();
 
     internal IList<IProjectionSource> All { get; } = new List<IProjectionSource>();
 

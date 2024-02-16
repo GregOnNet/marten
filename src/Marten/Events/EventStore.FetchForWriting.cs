@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using JasperFx.Core;
+using JasperFx.Core.Reflection;
 using Marten.Internal.Sessions;
 using Marten.Internal.Storage;
 using Marten.Linq.QueryHandlers;
@@ -86,46 +87,46 @@ internal partial class EventStore: IEventIdentityStrategy<Guid>, IEventIdentityS
 
     public Task<IEventStream<T>> FetchForWriting<T>(Guid id, CancellationToken cancellation = default) where T : class
     {
-        var plan = determineFetchPlan<T, Guid>();
+        var plan = findFetchPlan<T, Guid>();
         return plan.FetchForWriting(_session, id, false, cancellation);
     }
 
     public Task<IEventStream<T>> FetchForWriting<T>(string key, CancellationToken cancellation = default)
         where T : class
     {
-        var plan = determineFetchPlan<T, string>();
+        var plan = findFetchPlan<T, string>();
         return plan.FetchForWriting(_session, key, false, cancellation);
     }
 
     public Task<IEventStream<T>> FetchForWriting<T>(Guid id, long initialVersion,
         CancellationToken cancellation = default) where T : class
     {
-        var plan = determineFetchPlan<T, Guid>();
+        var plan = findFetchPlan<T, Guid>();
         return plan.FetchForWriting(_session, id, initialVersion, cancellation);
     }
 
     public Task<IEventStream<T>> FetchForWriting<T>(string key, long initialVersion,
         CancellationToken cancellation = default) where T : class
     {
-        var plan = determineFetchPlan<T, string>();
+        var plan = findFetchPlan<T, string>();
         return plan.FetchForWriting(_session, key, initialVersion, cancellation);
     }
 
     public Task<IEventStream<T>> FetchForExclusiveWriting<T>(Guid id,
         CancellationToken cancellation = default) where T : class
     {
-        var plan = determineFetchPlan<T, Guid>();
+        var plan = findFetchPlan<T, Guid>();
         return plan.FetchForWriting(_session, id, true, cancellation);
     }
 
     public Task<IEventStream<T>> FetchForExclusiveWriting<T>(string key,
         CancellationToken cancellation = default) where T : class
     {
-        var plan = determineFetchPlan<T, string>();
+        var plan = findFetchPlan<T, string>();
         return plan.FetchForWriting(_session, key, true, cancellation);
     }
 
-    private IAggregateFetchPlan<TDoc, TId> determineFetchPlan<TDoc, TId>() where TDoc : class
+    private IAggregateFetchPlan<TDoc, TId> findFetchPlan<TDoc, TId>() where TDoc : class
     {
         if (typeof(TId) == typeof(Guid))
         {
@@ -145,23 +146,28 @@ internal partial class EventStore: IEventIdentityStrategy<Guid>, IEventIdentityS
         // ReSharper disable once SuspiciousTypeConversion.Global
         var documentProvider = _store.Options.Providers.StorageFor<TDoc>();
         var storage = (IDocumentStorage<TDoc, TId>)documentProvider.IdentityMap;
-        IAggregateFetchPlan<TDoc, TId> plan;
-        if (_store.Options.Projections.DoesPersistAggregate(typeof(TDoc)))
-        {
-            plan = new FetchInlinedPlan<TDoc, TId>(_store.Events, (IEventIdentityStrategy<TId>)this, storage);
-        }
-        else
-        {
-            plan = new FetchLivePlan<TDoc, TId>(_store.Events, (IEventIdentityStrategy<TId>)this, storage);
-        }
+
+        var plan = determineFetchPlan(storage, _session.Options);
 
         _fetchStrategies = _fetchStrategies.AddOrUpdate(typeof(TDoc), plan);
 
         return plan;
     }
+
+    private IAggregateFetchPlan<TDoc, TId> determineFetchPlan<TDoc, TId>(IDocumentStorage<TDoc, TId> storage,
+        StoreOptions options) where TDoc : class
+    {
+        foreach (var planner in options.Projections.allPlanners())
+        {
+            if (planner.TryMatch(storage, (IEventIdentityStrategy<TId>)this, options, out var plan)) return plan;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(storage),
+            $"Unable to determine a fetch plan for aggregate {typeof(TDoc).FullNameInCode()}");
+    }
 }
 
-internal interface IAggregateFetchPlan<TDoc, TId>
+public interface IAggregateFetchPlan<TDoc, TId>
 {
     Task<IEventStream<TDoc>> FetchForWriting(DocumentSessionBase session, TId id, bool forUpdate,
         CancellationToken cancellation = default);
@@ -170,7 +176,7 @@ internal interface IAggregateFetchPlan<TDoc, TId>
         CancellationToken cancellation = default);
 }
 
-internal interface IEventIdentityStrategy<TId>
+public interface IEventIdentityStrategy<TId>
 {
     Task<IEventStorage> EnsureAggregateStorageExists<T>(DocumentSessionBase session, CancellationToken cancellation);
     NpgsqlCommand BuildCommandForReadingVersionForStream(TId id, bool forUpdate);
