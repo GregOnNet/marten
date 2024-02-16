@@ -7,7 +7,7 @@ using JasperFx.Core.Reflection;
 using Marten.Internal.Sessions;
 using Marten.Internal.Storage;
 using Marten.Linq.QueryHandlers;
-using Npgsql;
+using Weasel.Postgresql;
 
 namespace Marten.Events;
 
@@ -15,7 +15,7 @@ internal partial class EventStore: IEventIdentityStrategy<Guid>, IEventIdentityS
 {
     private ImHashMap<Type, object> _fetchStrategies = ImHashMap<Type, object>.Empty;
 
-    async Task<IEventStorage> IEventIdentityStrategy<Guid>.EnsureAggregateStorageExists<T>(
+    async Task<IEventStorage> IEventIdentityStrategy<Guid>.EnsureEventStorageExists<T>(
         DocumentSessionBase session, CancellationToken cancellation)
     {
         var selector = _store.Events.EnsureAsGuidStorage(_session);
@@ -50,7 +50,7 @@ internal partial class EventStore: IEventIdentityStrategy<Guid>, IEventIdentityS
         return new ListQueryHandler<IEvent>(statement, selector);
     }
 
-    async Task<IEventStorage> IEventIdentityStrategy<string>.EnsureAggregateStorageExists<T>(
+    async Task<IEventStorage> IEventIdentityStrategy<string>.EnsureEventStorageExists<T>(
         DocumentSessionBase session, CancellationToken cancellation)
     {
         var selector = _store.Events.EnsureAsStringStorage(_session);
@@ -178,8 +178,8 @@ public interface IAggregateFetchPlan<TDoc, TId>
 
 public interface IEventIdentityStrategy<TId>
 {
-    Task<IEventStorage> EnsureAggregateStorageExists<T>(DocumentSessionBase session, CancellationToken cancellation);
-    NpgsqlCommand BuildCommandForReadingVersionForStream(TId id, bool forUpdate);
+    Task<IEventStorage> EnsureEventStorageExists<T>(DocumentSessionBase session, CancellationToken cancellation);
+    void BuildCommandForReadingVersionForStream(ICommandBuilder builder, TId id, bool forUpdate);
 
     IEventStream<TDoc> StartStream<TDoc>(TDoc document, DocumentSessionBase session, TId id,
         CancellationToken cancellation) where TDoc : class;
