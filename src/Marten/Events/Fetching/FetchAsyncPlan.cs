@@ -1,6 +1,8 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using JasperFx.Core;
 using Marten.Events.Projections;
 using Marten.Exceptions;
 using Marten.Internal.Sessions;
@@ -43,6 +45,7 @@ internal class FetchAsyncPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where T
     private readonly IDocumentStorage<TDoc, TId> _storage;
     private readonly ILiveAggregator<TDoc> _aggregator;
     private readonly string _versionSelectionSql;
+    private string _initialSql;
 
     public FetchAsyncPlan(EventGraph events, IEventIdentityStrategy<TId> identityStrategy,
         IDocumentStorage<TDoc, TId> storage)
@@ -64,6 +67,9 @@ internal class FetchAsyncPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where T
         var selector = await _identityStrategy.EnsureEventStorageExists<TDoc>(session, cancellation)
             .ConfigureAwait(false);
 
+        _initialSql ??=
+            $"select {selector.SelectFields().Select(x => "d." + x).Join(", ")} from {_events.DatabaseSchemaName}.mt_events as d";
+
         // TODO -- use read only transaction????
 
         if (forUpdate)
@@ -81,7 +87,7 @@ internal class FetchAsyncPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where T
 
         builder.StartNewCommand();
 
-        writeEventFetchStatement(id, selector, builder);
+        writeEventFetchStatement(id, builder);
 
         long version = 0;
         try
@@ -125,10 +131,10 @@ internal class FetchAsyncPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where T
         }
     }
 
-    private void writeEventFetchStatement(TId id, IEventStorage selector,
+    private void writeEventFetchStatement(TId id,
         BatchBuilder builder)
     {
-        selector.Apply(builder);
+        builder.Append(_initialSql);
         builder.Append(_versionSelectionSql);
         builder.AppendParameter(id);
     }
@@ -142,6 +148,9 @@ internal class FetchAsyncPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where T
         var selector = await _identityStrategy.EnsureEventStorageExists<TDoc>(session, cancellation)
             .ConfigureAwait(false);
 
+        _initialSql ??=
+            $"select {selector.SelectFields().Select(x => "d." + x).Join(", ")} from {_events.DatabaseSchemaName}.mt_events as d";
+
         // TODO -- use read only transaction????
 
         var builder = new BatchBuilder{TenantId = session.TenantId};
@@ -154,7 +163,7 @@ internal class FetchAsyncPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where T
 
         builder.StartNewCommand();
 
-        writeEventFetchStatement(id, selector, builder);
+        writeEventFetchStatement(id, builder);
 
         long version = 0;
         try
