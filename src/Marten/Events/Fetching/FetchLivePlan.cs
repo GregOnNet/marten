@@ -1,33 +1,35 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Marten.Events.Projections;
 using Marten.Exceptions;
 using Marten.Internal.Sessions;
 using Marten.Internal.Storage;
-using Marten.Linq.QueryHandlers;
 using Weasel.Postgresql;
 
-namespace Marten.Events;
+namespace Marten.Events.Fetching;
 
-internal class FetchInlinedPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where TDoc : class
+internal class FetchLivePlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where TDoc : class
 {
+    private readonly ILiveAggregator<TDoc> _aggregator;
+    private readonly IDocumentStorage<TDoc, TId> _documentStorage;
     private readonly EventGraph _events;
     private readonly IEventIdentityStrategy<TId> _identityStrategy;
-    private readonly IDocumentStorage<TDoc, TId> _storage;
 
-    internal FetchInlinedPlan(EventGraph events, IEventIdentityStrategy<TId> identityStrategy,
-        IDocumentStorage<TDoc, TId> storage)
+    public FetchLivePlan(EventGraph events, IEventIdentityStrategy<TId> identityStrategy,
+        IDocumentStorage<TDoc, TId> documentStorage)
     {
         _events = events;
         _identityStrategy = identityStrategy;
-        _storage = storage;
+        _documentStorage = documentStorage;
+        _aggregator = _events.Options.Projections.AggregatorFor<TDoc>();
     }
 
     public async Task<IEventStream<TDoc>> FetchForWriting(DocumentSessionBase session, TId id, bool forUpdate,
         CancellationToken cancellation = default)
     {
-        await _identityStrategy.EnsureAggregateStorageExists<TDoc>(session, cancellation).ConfigureAwait(false);
-        await session.Database.EnsureStorageExistsAsync(typeof(TDoc), cancellation).ConfigureAwait(false);
+        var selector = await _identityStrategy.EnsureAggregateStorageExists<TDoc>(session, cancellation)
+            .ConfigureAwait(false);
 
         if (forUpdate)
         {
@@ -38,7 +40,7 @@ internal class FetchInlinedPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where
         var builder = new CommandBuilder(command);
         builder.Append(";");
 
-        var handler = new LoadByIdHandler<TDoc, TId>(_storage, id);
+        var handler = _identityStrategy.BuildEventQueryHandler(id, selector);
         handler.ConfigureCommand(builder, session);
 
         long version = 0;
@@ -52,7 +54,12 @@ internal class FetchInlinedPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where
             }
 
             await reader.NextResultAsync(cancellation).ConfigureAwait(false);
-            var document = await handler.HandleAsync(reader, session, cancellation).ConfigureAwait(false);
+            var events = await handler.HandleAsync(reader, session, cancellation).ConfigureAwait(false);
+            var document = await _aggregator.BuildAsync(events, session, default, cancellation).ConfigureAwait(false);
+            if (document != null)
+            {
+                _documentStorage.SetIdentity(document, id);
+            }
 
             return version == 0
                 ? _identityStrategy.StartStream(document, session, id, cancellation)
@@ -70,16 +77,17 @@ internal class FetchInlinedPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where
     }
 
     public async Task<IEventStream<TDoc>> FetchForWriting(DocumentSessionBase session, TId id,
-        long expectedStartingVersion, CancellationToken cancellation = default)
+        long expectedStartingVersion,
+        CancellationToken cancellation = default)
     {
-        await _identityStrategy.EnsureAggregateStorageExists<TDoc>(session, cancellation).ConfigureAwait(false);
-        await session.Database.EnsureStorageExistsAsync(typeof(TDoc), cancellation).ConfigureAwait(false);
+        var selector = await _identityStrategy.EnsureAggregateStorageExists<TDoc>(session, cancellation)
+            .ConfigureAwait(false);
 
         var command = _identityStrategy.BuildCommandForReadingVersionForStream(id, false);
         var builder = new CommandBuilder(command);
         builder.Append(";");
 
-        var handler = new LoadByIdHandler<TDoc, TId>(_storage, id);
+        var handler = _identityStrategy.BuildEventQueryHandler(id, selector);
         handler.ConfigureCommand(builder, session);
 
         long version = 0;
@@ -100,7 +108,9 @@ internal class FetchInlinedPlan<TDoc, TId>: IAggregateFetchPlan<TDoc, TId> where
             }
 
             await reader.NextResultAsync(cancellation).ConfigureAwait(false);
-            var document = await handler.HandleAsync(reader, session, cancellation).ConfigureAwait(false);
+            var events = await handler.HandleAsync(reader, session, cancellation).ConfigureAwait(false);
+            var document = await _aggregator.BuildAsync(events, session, default, cancellation).ConfigureAwait(false);
+
 
             return version == 0
                 ? _identityStrategy.StartStream(document, session, id, cancellation)
