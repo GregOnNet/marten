@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Marten.Events;
 using Marten.Events.Projections;
@@ -405,7 +406,7 @@ public class fetching_async_aggregates_for_writing : OneOffConfigurationsContext
         await theSession.SaveChangesAsync();
 
         var stream = await theSession.Events.FetchForWriting<SimpleAggregateAsString>(streamId, 6);
-        SpecificationExtensions.ShouldNotBeNull(stream.Aggregate);
+        stream.Aggregate.ShouldNotBeNull();
         stream.CurrentVersion.ShouldBe(6);
 
         stream.AppendOne(new EEvent());
@@ -464,5 +465,74 @@ public class fetching_async_aggregates_for_writing : OneOffConfigurationsContext
         {
             await theSession.SaveChangesAsync();
         });
+    }
+
+    [Fact]
+    public async Task fetch_aggregate_that_is_completely_caught_up()
+    {
+        StoreOptions(opts =>
+        {
+            opts.Projections.Snapshot<SimpleAggregateAsString>(SnapshotLifecycle.Async);
+            opts.Events.StreamIdentity = StreamIdentity.AsString;
+        });
+
+        var streamId = Guid.NewGuid().ToString();
+
+        theSession.Events.StartStream<SimpleAggregateAsString>(streamId, new AEvent(), new BEvent(), new BEvent(), new BEvent(),
+            new CEvent(), new CEvent());
+        await theSession.SaveChangesAsync();
+
+        var daemon = await theStore.BuildProjectionDaemonAsync();
+        await daemon.RebuildProjectionAsync<SimpleAggregateAsString>(CancellationToken.None);
+
+        var stream = await theSession.Events.FetchForWriting<SimpleAggregateAsString>(streamId, 6);
+        stream.Aggregate.ShouldNotBeNull();
+        stream.CurrentVersion.ShouldBe(6);
+
+        stream.AppendOne(new EEvent());
+        await theSession.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task fetch_aggregate_that_is_in_progress()
+    {
+        StoreOptions(opts =>
+        {
+            opts.Projections.Snapshot<SimpleAggregateAsString>(SnapshotLifecycle.Async);
+            opts.Events.StreamIdentity = StreamIdentity.AsString;
+        });
+
+        var streamId = Guid.NewGuid().ToString();
+
+        theSession.Events.StartStream<SimpleAggregateAsString>(streamId, new AEvent(), new BEvent(), new BEvent(), new BEvent(),
+            new CEvent(), new CEvent());
+        await theSession.SaveChangesAsync();
+
+        var daemon = await theStore.BuildProjectionDaemonAsync();
+        await daemon.RebuildProjectionAsync<SimpleAggregateAsString>(CancellationToken.None);
+        await daemon.StopAllAsync();
+
+        var existing = await theSession.LoadAsync<SimpleAggregateAsString>(streamId);
+
+        var stream = await theSession.Events.FetchForWriting<SimpleAggregateAsString>(streamId, 6);
+        stream.Aggregate.ShouldNotBeNull();
+        stream.CurrentVersion.ShouldBe(6);
+
+        existing = await theSession.LoadAsync<SimpleAggregateAsString>(streamId);
+
+        stream.AppendOne(new EEvent());
+        await theSession.SaveChangesAsync();
+
+        using (var session = theStore.LightweightSession())
+        {
+            session.Events.Append(streamId, new AEvent(), new BEvent(), new BEvent(), new BEvent());
+            await session.SaveChangesAsync();
+        }
+
+        stream = await theSession.Events.FetchForWriting<SimpleAggregateAsString>(streamId, 11);
+        stream.Aggregate.ShouldNotBeNull();
+        stream.CurrentVersion.ShouldBe(11);
+
+        stream.Aggregate.BCount.ShouldBe(6);
     }
 }
